@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/MPRLibrary.iml" filepath="$PROJECT_DIR$/MPRLibrary.iml" />
+      <module fileurl="file://$PROJECT_DIR$/mprapplication/mprapplication.iml" filepath="$PROJECT_DIR$/mprapplication/mprapplication.iml" />
+      <module fileurl="file://$PROJECT_DIR$/mprlibrary/mprlibrary.iml" filepath="$PROJECT_DIR$/mprlibrary/mprlibrary.iml" />
+    </modules>
+  </component>
+</project>
