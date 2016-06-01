@@ -22,10 +22,10 @@ public class MediaPlayerRecorder implements MediaPlayer.OnPreparedListener, Medi
          * It is called for player or recorder.
          *
          * @param mpr             MediaPlayerRecorder the time has elapsed
-         * @param currentPosition When PLAYING state, returns MediaPlayer.getCurrentPosition.
-         *                        When RECORDING state, returns the elapsed time since recording started
+         * @param currentPosition When PLAYING state, returns MediaPlayer.getCurrentPosition. (elapsed time in milliseconds)
+         *                        When RECORDING state, returns the elapsed time since recording started (elapsed time in milliseconds)
          */
-        void onTimeUpdate(MediaPlayerRecorder mpr, int currentPosition);
+        void onTimeUpdate(MediaPlayerRecorder mpr, long currentPosition);
     }
 
     public interface OnCompletionListener {
@@ -96,27 +96,66 @@ public class MediaPlayerRecorder implements MediaPlayer.OnPreparedListener, Medi
     }
 
     /**
-     * Initial state before calling prepareTo.
+     * Initial state before calling prepareTo or when recording is paused
+     * As recorder doesn't have PAUSED stated, it sets state to NONE
      */
     public static final int NONE = 0;
 
     /**
      * In this state the MediaPlayerRecorder has already been paused from recording or playing
      */
+    public static final int ERROR = -1;
+
+    /**
+     * When player is paused
+     */
     public static final int PAUSED = 1;
+
+    /**
+     * When player is playing something
+     */
     public static final int PLAYING = 2;
+
+    /**
+     * When player is preparing to play
+     */
     public static final int PREPARINGTOPLAY = 3;
+
+    /**
+     * When player is prepared to play
+     */
     public static final int PREPAREDTOPLAY = 4;
+
+    /**
+     * When player is preparing to play and is going to play as soon as the player is prepared
+     */
     public static final int PREPARINGTOPLAYANDPLAYING = 5;
+
+    /**
+     * When recorder is recording
+     */
     public static final int RECORDING = 6;
+
+    /**
+     * When recorder is preparing to record
+     */
     public static final int PREPARINGTORECORD = 7;
+
+    /**
+     * When recorder is prepared to record
+     */
     public static final int PREPAREDTORECORD = 8;
+
+    /**
+     * When recorder is preparing to record and is going to record as soon as the recorder is ready
+     */
     public static final int PREPARINGTORECORDANDRECORDING = 9;
 
     protected MediaPlayer player;
     protected MediaRecorder recorder;
 
     protected int currentState;
+    protected int lastState;
     protected String dataSource;
     protected boolean looping;
     protected int maxDuration;
@@ -134,8 +173,7 @@ public class MediaPlayerRecorder implements MediaPlayer.OnPreparedListener, Medi
                     onTimeUpdateListener.onTimeUpdate(MediaPlayerRecorder.this, player.getCurrentPosition());
                 } else if (currentState == RECORDING) {
                     long millis = System.currentTimeMillis() - startRecordTime;
-                    int seconds = (int) (millis / 1000);
-                    onTimeUpdateListener.onTimeUpdate(MediaPlayerRecorder.this, seconds);
+                    onTimeUpdateListener.onTimeUpdate(MediaPlayerRecorder.this, millis);
                 }
 
                 handler.postDelayed(this, 1000);
@@ -211,11 +249,7 @@ public class MediaPlayerRecorder implements MediaPlayer.OnPreparedListener, Medi
     public MediaPlayerRecorder() {
         this.looping = false;
         this.handler = new Handler();
-    }
-
-    public void release() {
-        releasePlayer();
-        releaseRecorder();
+        this.currentState = NONE;
     }
 
     /**
@@ -248,13 +282,13 @@ public class MediaPlayerRecorder implements MediaPlayer.OnPreparedListener, Medi
         if (this.player == null) {
             try {
                 initPlayer();
+                this.player.prepareAsync();
             } catch (IOException e) {
                 e.printStackTrace();
                 return false;
             }
-        }
-
-        this.player.prepareAsync();
+        } else if (this.currentState == PREPARINGTOPLAY)
+            this.currentState = PREPAREDTOPLAY;
 
         return true;
     }
@@ -329,8 +363,7 @@ public class MediaPlayerRecorder implements MediaPlayer.OnPreparedListener, Medi
      */
     public boolean play() throws IllegalStateException {
         switch (this.currentState) {
-            case NONE:
-            case PAUSED: {
+            case NONE: {
                 if (prepareToPlay())
                     return play();
                 else
@@ -344,6 +377,7 @@ public class MediaPlayerRecorder implements MediaPlayer.OnPreparedListener, Medi
                 this.currentState = PREPARINGTOPLAYANDPLAYING;
                 return true;
             }
+            case PAUSED:
             case PREPAREDTOPLAY: {
                 this.currentState = PLAYING;
                 this.startTimeUpdate();
@@ -373,6 +407,7 @@ public class MediaPlayerRecorder implements MediaPlayer.OnPreparedListener, Medi
             case PREPARINGTOPLAYANDPLAYING: {
                 this.player.pause();
                 stopTimeUpdate();
+                this.currentState = PAUSED;
                 break;
             }
             case RECORDING:
@@ -380,14 +415,13 @@ public class MediaPlayerRecorder implements MediaPlayer.OnPreparedListener, Medi
             case PREPARINGTORECORD:
             case PREPARINGTORECORDANDRECORDING: {
                 if (this.recorder != null) {
-                    releaseRecorder();
+//                    releaseRecorder();
+                    release();
                     stopTimeUpdate();
                 }
                 break;
             }
         }
-
-        this.currentState = PAUSED;
     }
 
     /**
@@ -435,12 +469,38 @@ public class MediaPlayerRecorder implements MediaPlayer.OnPreparedListener, Medi
     /**
      * Seeks to specified time position.
      *
-     * @param msec the offset in milliseconds from the start to seek to
+     * @param sec the offset in milliseconds from the start to seek to
      */
-    public void seekTo(int msec) {
-        if (player != null) {
-            player.seekTo(msec);
+    public void seekTo(int sec) {
+        if (this.currentState == RECORDING ||
+                this.currentState == PREPARINGTORECORDANDRECORDING ||
+                this.currentState == PREPARINGTORECORD ||
+                this.currentState == PREPAREDTORECORD) {
+            throw new IllegalStateException("Recording state conflicts with playing state");
         }
+        if (this.player != null) {
+            this.lastState = this.currentState;
+            pause();
+            this.player.seekTo(sec);
+        }
+    }
+
+    /**
+     * Releases all resources from player and recorder.
+     * It is called when recorder is paused
+     */
+    public void release() {
+        releasePlayer();
+        releaseRecorder();
+        this.currentState = NONE;
+    }
+
+    public boolean isPlaying() {
+        return (this.currentState == PLAYING || this.currentState == PREPARINGTOPLAYANDPLAYING);
+    }
+
+    public boolean isRecording() {
+        return (this.currentState == RECORDING || this.currentState == PREPARINGTORECORDANDRECORDING);
     }
 
     public boolean isLooping() {
@@ -567,12 +627,20 @@ public class MediaPlayerRecorder implements MediaPlayer.OnPreparedListener, Medi
 
     @Override
     public void onPrepared(MediaPlayer mediaPlayer) {
+        int oldState = this.currentState;
+        this.currentState = PREPAREDTOPLAY;
+
+        if (oldState == PREPARINGTOPLAYANDPLAYING)
+            play();
+
         if (onPreparedListener != null)
             onPreparedListener.onPlayerPrepared(this);
     }
 
     @Override
     public boolean onError(MediaPlayer mediaPlayer, int i, int i1) {
+        pause();
+
         if (onErrorListener != null)
             return onErrorListener.onError(this, i, i1);
         return false;
@@ -580,6 +648,8 @@ public class MediaPlayerRecorder implements MediaPlayer.OnPreparedListener, Medi
 
     @Override
     public void onError(MediaRecorder mediaRecorder, int i, int i1) {
+        pause();
+
         boolean result = false;
         if (onErrorListener != null)
             result = onErrorListener.onError(this, i, i1);
@@ -591,6 +661,12 @@ public class MediaPlayerRecorder implements MediaPlayer.OnPreparedListener, Medi
 
     @Override
     public void onCompletion(MediaPlayer mediaPlayer) {
+        if (this.currentState == PLAYING && this.looping) {
+            play();
+        } else {
+            pause();
+        }
+
         if (onCompletionListener != null)
             onCompletionListener.onCompletion(this, true);
     }
@@ -599,6 +675,8 @@ public class MediaPlayerRecorder implements MediaPlayer.OnPreparedListener, Medi
     public void onInfo(MediaRecorder mediaRecorder, int i, int i1) {
         if (i == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED ||
                 i == MediaRecorder.MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED) {
+            pause();
+
             if (onCompletionListener != null)
                 onCompletionListener.onCompletion(this, true);
         } else {
@@ -608,6 +686,9 @@ public class MediaPlayerRecorder implements MediaPlayer.OnPreparedListener, Medi
 
     @Override
     public void onSeekComplete(MediaPlayer mediaPlayer) {
+        if (this.lastState == PLAYING)
+            play();
+
         if (onSeekListener != null)
             onSeekListener.onSeekComplete(this);
     }
